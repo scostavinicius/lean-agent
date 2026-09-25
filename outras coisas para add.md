@@ -1,90 +1,64 @@
-  ### 1. Ferramentas (Tools) que dão Agência Real ao Agente Lean 4
 
-  No Lean 4, um matemático humano não tenta chutar a prova inteira às cegas; ele inspeciona definições, testa casos e consulta lemas. O agente deve ter ferramentas para fazer o
-  mesmo:
+---
 
-  #### A. Ferramenta #print (inspecionar_definicao)
-  Você já tem o #check (que devolve o Tipo). Mas o #print revela como uma função ou tipo foi definido e seus axiomas de indução.
-  • Exemplo de uso pelo agente: Para provar a + b = b + a, o modelo pode rodar #print Nat.add e descobrir que a adição foi definida recursivamente por Nat.add_zero e Nat.
-  add_succ.
-  • Implementação:
-    @tool
-    def inspecionar_definicao(simbolo: str) -> str:
-        """Executa `#print <simbolo>` no Lean 4 para ver a definição de tipos, construtores ou lemas."""
-        codigo = f"#print {simbolo}\n"
-        Path("Print.lean").write_text(codigo, encoding="utf-8")
-        res = subprocess.run(["lean", "Print.lean"], capture_output=True, text=True)
-        return res.stdout + res.stderr
+### 1. Ferramenta de Aplicação de Teoremas Padrão (Heurísticas Prontas)
 
+* **O que faz:** Um middleware que testa automaticamente estratégias conhecidas (como chamar `omega`, `simp`, `rfl` ou lemas básicos de igualdade) antes de acionar o LLM.
+* **Por que é ótima:** Economiza tempo de computação e chamadas de API em teoremas triviais de aritmética e álgebra básica. O LLM deve ser reservado apenas para os momentos em que o caminho lógico precisa de criatividade (como induções complexas).
 
-  #### B. Ferramenta de Guia/Documentação de Táticas (consultar_tatica)
+### 2. Parser da Saída de Erro do Lean (Filtragem de Logs)
 
-  Modelos de linguagem frequentemente erram a sintaxe exata do Lean 4 (confundindo com Lean 3 ou inventando nomes de táticas). Ter um catálogo interno permite ao modelo
-  consultar como aplicar cada tática:
-  • O que faz: Se o Lean retornar erro em um induction, o agente chama consultar_tatica("induction") e recebe exemplos de sintaxe válida (induction a with | zero => ... | succ
-  a ih => ...).
-  • Implementação: Um dicionário local em Python mapeando táticas (intro, rw, apply, cases, induction, omega, simp, rfl) para seus templates e explicações sucintas.
-  #### C. Ferramenta #eval (avaliar_expressao)
+* **O que faz:** Uma função Python que lê o log bruto do compilador do Lean e extrai apenas o que importa: **as hipóteses ativas** e a **meta atual ($\vdash$)**.
+* **Por que é ótima:** Os logs do Lean vêm cheios de ruídos de compilação. Passar um texto limpo focando no "objetivo atual" faz a taxa de acerto do LLM subir drasticamente, evitando alucinações causadas por excesso de tokens irrelevantes.
 
-  • O que faz: Executa #eval <expressao>. Permite ao agente testar casos base ou verificar contraexemplos numéricos antes de tentar provar uma propriedade geral.
-  • Exemplo: #eval (2 + 3) + 4 == 2 + (3 + 4) ajuda o modelo a confirmar a semântica da igualdade.
+### 3. Consulta de Teoremas/Mathlib (RAG ou Busca Local)
 
-  #### D. Ferramenta de Busca de Lemas / Sugestões (sugerir_lemas)
+* **O que faz:** Uma base de dados ou função de busca onde o agente pode pesquisar nomes de teoremas da biblioteca padrão do Lean (Mathlib) por palavras-chave (ex: buscar lemas relacionados a comutatividade de naturais).
+* **Por que é ótima:** O maior calcanhar de Aquiles de LLMs em provas formais é inventar nomes de teoremas que não existem (ex: chutar `Nat.add_comm_custom`). Dar ao agente uma ferramenta de busca reduz erros de compilação por nomes incorretos.
 
-  • O que faz: No Lean 4, quando não sabemos o nome exato do lema, usamos táticas de busca ou inspecionamos os lemas do módulo.
-  • O agente pode ter uma ferramenta que busca no ambiente lemas que contêm certas palavras-chave (por exemplo, pesquisar por "add_comm", "add_assoc", "zero_add").
-  ──────
-  ### 2. Seria interessante colocar Memória nele?
+### 4. Memória do Agente (Histórico de Tentativas)
 
-  Sim, e é um dos mecanismos mais valorizados para esse tipo de tarefa!
+* **O que faz:** Uma estrutura de dados que registra o histórico de táticas que **já foram tentadas e falharam** na mesma prova, além de registrar estratégias bem-sucedidas em teoremas anteriores.
+* **Por que é ótima:** Impede que o agente entre em loops infinitos, tentando exatamente a mesma tática incorreta repetidas vezes. A memória permite que ele analise: *"A tática X falhou no passo anterior com o erro Y, logo preciso tentar uma abordagem diferente (como indução)"*.
 
-  No seu notebook, a seção 2.5 Mecanismos pede expressamente:
+### 5. Análise de Fotos para Transcrição em Lean (Visão Computacional)
 
-  │ "Por exemplo, estado para não repetir tentativas e planejamento da prova em etapas. Requisito atendido: pelo menos 2 mecanismos com função real."
+* **O que faz:** Permitir que o agente receba uma imagem (como uma foto tirada de um livro de matemática, uma lousa ou um rascunho em papel) e use a capacidade multimodal do Gemini para convertê-la em um enunciado formal em Lean 4.
+* **Por que é ótima:** É um diferencial espetacular! Em vez de ter que digitar equações matemáticas complexas manualmente em formato de texto, você simplesmente tira foto de um exercício e o agente traduz para o código do Lean para começar a provar.
 
-  Existem dois níveis de memória que transformam seu agente:
+---
 
-  #### Nível 1: Memória de Trabalho / Tentativas Falhas (Anti-Loop) — Indispensável
+### Por onde começar? (Ordem Sugerida de Implementação)
 
-  • O problema sem memória: O LLM frequentemente entra em loop: tenta simp, falha com erro X; depois tenta rw [Nat.add_zero], falha com erro Y; e na 3ª iteração tenta simp
-  novamente.
-  • Como a memória resolve:
-  O agente mantém uma lista de tentativas que já falharam:
-    memoria_tentativas = [
-        {"tatica": "simp", "erro": "simp made no progress"},
-        {"tatica": "rw [Nat.add_zero]", "erro": "did not find instance"}
-    ]
-  Ao receber esse histórico, o prompt do agente ganha a instrução explícita: "Você já tentou as estratégias acima e elas falharam. Não repita nenhuma delas."
+Para não sobrecarregar o desenvolvimento de uma só vez, recomendo seguir esta ordem lógica:
 
-  #### Nível 2: Memória de Longo Prazo / Episódica (agentkit.memory)
+1. **Passo 1 (Parser de Erros):** Facilita a vida do LLM imediatamente, entregando logs limpos. [X]
+2. **Passo 2 (Aplicação de Heurísticas/Teoremas Padrão):** Resolve os casos fáceis sem gastar tokens.[x]
+3. **Passo 3 (Memória do Agente):** Evita repetição de erros no loop iterativo.  [X]
 
-  O próprio pacote agentkit já vem com as funções remember e recall baseadas em vetores/embeddings:
+4. **Passo 4 (Consulta à Mathlib):** Melhora a precisão de comandos complexos.
+5. **Passo 5 (Análise de Fotos):** O toque final de usabilidade para importar teoremas visuais.
 
-  • Como funciona na prática:
-      1. Quando o agente consegue provar com sucesso um teorema (por exemplo, comutatividade da soma a + b = b + a usando indução), ele guarda na memória:
-        remember(memoria, embeddings, text="Teorema add_comm provado com: induction a with ...")
+# posterior:
 
-      2. Quando você pedir para ele provar outro teorema semelhante (ex: (a + b) + c = a + (b + c) ou a * b = b * a), ele executa:
-        exemplos_uteis = recall(memoria, embeddings, query=novo_enunciado, k=2)
+### 1. Busca em Árvore (Tree Search / Backtracking)
 
-      3. O agente recupera a prova anterior como um exemplo (few-shot) de sucesso. O modelo passa a "aprender" com os teoremas que ele próprio já resolveu!
+* **O que faz:** Em vez de seguir um caminho linear (tenta $\rightarrow$ erra $\rightarrow$ corrige o mesmo arquivo), o agente cria **ramificações (branches)**. Se em um determinado passo houver duas táticas plausíveis (`omega` ou `induction`), o agente explora ambas em paralelo. Se um caminho falhar completamente, ele faz um *backtracking* (volta atrás) para um estado anterior válido e tenta a outra rota.
+* **Por que é matador:** Evita que o agente fique preso em um beco sem saída lógico de onde ele não consegue retornar sozinho.
 
-  ──────
-  ### Visão Geral da Arquitetura Ideal
+### 2. Decomposição Automática de Metas (`have` Statements)
 
-  Com isso, o fluxo do seu agente passa a ser verdadeiramente agêntico:
+* **O que faz:** Ensinar o agente a quebrar teoremas complexos em pedaços menores. Quando ele percebe que o objetivo principal é muito difícil, ele próprio escreve um sub-teorema intermediário (`have h : ... := by ...`), prova esse pedaço primeiro, e depois usa o resultado para fechar a prova principal.
+* **Por que é matador:** É exatamente isso que matemáticos humanos fazem. Dividir para conquistar reduz a complexidade que o LLM precisa processar de uma só vez.
 
-    [Enunciado do Teorema]
-            │
-            ▼
-       [AgentKit] ──── Consulta Memória ────► [Lembra de provas semelhantes passadas]
-            │
-            ├──► Executa `inspecionar_definicao` (#print Nat.add)
-            ├──► Executa `consultar_tatica` (checa sintaxe da induction)
-            ├──► Executa `test_prova` (testa o script de prova no Lean)
-            │         ▲
-            │         └── Lê o erro do compilador Lean
-            ▼
-    [Decide se para (Prova Aceita) ou tenta nova estratégia sem repetir erros da memória]
+### 3. Geração Paralela com Teste de Múltiplas Hipóteses (Self-Consistency)
 
-  Essa composição atende com sobra todos os critérios de ferramentas ativas, mecanismos de controle e agência autônoma exigidos no trabalho.
+* **O que faz:** Quando o Lean retorna um erro, o agente pede para o LLM gerar **3 a 5 opções diferentes de correção** em uma única chamada ou em paralelo. Em seguida, ele testa todas elas no Lean de forma sequencial.
+* **Por que é matador:** Se a primeira opção falhar, a segunda ou a terceira podem passar imediatamente, economizando rodadas inteiras do loop de feedback.
+
+### 4. Integração com o LSP (Language Server Protocol) do Lean
+
+* **O que faz:** Em vez de compilar o arquivo inteiro via `subprocess` a cada alteração, o agente se comunica diretamente com o servidor de linguagem do Lean que roda em segundo plano no VS Code.
+* **Por que é matador:** É muito mais rápido e permite inspecionar o estado exato das variáveis linha por linha quase em tempo real, sem o overhead de reprocessar todo o arquivo do zero.
+
+---
