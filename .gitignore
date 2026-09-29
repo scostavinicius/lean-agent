@@ -1,2 +1,4 @@
 .env
 groq_key.txt
+workspace/
+Teste.lean
