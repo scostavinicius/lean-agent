@@ -85,3 +85,26 @@ def rodar_casos(nomes: list[str] | None = None, pausa: float = 0.0, rastro: bool
     print(f"\n{sum(r['acertou'] for r in resultados)}/{len(resultados)} casos com o resultado esperado")
     print(resumo_uso(total.usage_metadata))
     return resultados
+
+
+def _celula(texto: str, limite: int = 120) -> str:
+    """Texto que cabe numa célula de tabela Markdown: uma linha só, sem quebrar a coluna no `|`."""
+    texto = " / ".join(linha.strip() for linha in texto.strip().splitlines() if linha.strip())
+    if len(texto) > limite:
+        texto = texto[:limite] + "…"
+    return texto.replace("|", "\\|")
+
+
+def tabela_markdown(resultados: list[dict]) -> str:
+    """A tabela no formato que o README pede: entrada, resultado esperado, obtido e se foi aprovado."""
+    linhas = ["| caso | entrada | resultado esperado | resultado obtido | aprovado | tokens |",
+              "|---|---|---|---|---|---|"]
+    for r in resultados:
+        esperado = "prova aceita pelo Lean" if r["esperado"] == "provar" else "nenhuma prova aceita (teorema falso)"
+        obtido = (f"prova aceita: `{_celula(r['detalhe'])}`" if r["aceita"]
+                  else f"nenhuma prova aceita; último erro: {_celula(r['detalhe'])}")
+        linhas.append(f"| {r['nome']} | `{_celula(r['enunciado'])}` | {esperado} | {obtido} | "
+                      f"{'sim' if r['acertou'] else 'não'} | {r['tokens']} |")
+    acertos = sum(r["acertou"] for r in resultados)
+    taxa = acertos / len(resultados) if resultados else 0
+    return "\n".join(linhas) + f"\n\n**Taxa de acerto:** {acertos}/{len(resultados)} ({taxa:.0%})"

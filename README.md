@@ -45,6 +45,35 @@ pytest                                # parser, provas de referência no Lean e 
 
 Os testes do grafo usam um modelo roteirizado e não gastam a API.
 
+### Notebook local
+
+O [lean_agent_langgraph.ipynb](lean_agent_langgraph.ipynb) roda local com a chave lida da variável
+de ambiente `GROQ_API_KEY`, que tem prioridade sobre o `.env`. O kernel do Jupyter herda as variáveis
+do programa que o abriu, então a variável precisa existir **antes** de abrir o editor.
+
+1. Defina a variável, de um destes jeitos:
+   - **Permanente (Windows):** menu Iniciar → "Editar as variáveis de ambiente para sua conta" →
+     Novo → nome `GROQ_API_KEY`, valor a chave. Feche e abra de novo o VS Code e os terminais.
+     Pela janela do Windows a chave não fica no histórico do terminal.
+   - **Só neste terminal (Git Bash)**, sem mostrar a chave nem gravá-la no histórico:
+     ```bash
+     read -rsp "GROQ_API_KEY: " GROQ_API_KEY && export GROQ_API_KEY
+     ```
+   - **Só neste terminal (PowerShell):**
+     ```powershell
+     $env:GROQ_API_KEY = [Net.NetworkCredential]::new("", (Read-Host "GROQ_API_KEY" -AsSecureString)).Password
+     ```
+2. Abra o notebook:
+   - **VS Code** (extensões Python e Jupyter): com todas as janelas do VS Code fechadas, rode `code .`
+     no terminal onde a variável foi definida (ou abra normalmente, se ela for permanente). Abra o
+     notebook, clique em *Select Kernel* → `.venv\Scripts\python.exe` e depois em *Run All*.
+   - **JupyterLab no navegador:** instale uma vez com `.venv/Scripts/python -m pip install jupyterlab` e
+     abra com `.venv/Scripts/python -m jupyter lab lean_agent_langgraph.ipynb` no mesmo terminal.
+3. Confira a saída da célula da chave: `GROQ_API_KEY lida de: variável de ambiente`.
+
+Para rodar só alguns casos, ponha os nomes em `CASOS_ESCOLHIDOS` (seção 4 do notebook). A última
+célula gera a tabela de resultados em Markdown, no formato da seção de casos de teste deste README.
+
 ## O grafo
 
 ```mermaid
