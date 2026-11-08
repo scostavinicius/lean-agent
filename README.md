@@ -103,6 +103,9 @@ graph TD
 | `verificar` | Verifica de novo, fora do agente, a prova que o Lean aceitou e escreve a resposta final. |
 | `conversar` | Responde o que não é pedido de prova, com as últimas mensagens da thread. |
 
+A explicação completa (por que cada nó existe, quando cada aresta condicional é escolhida e um
+exemplo passo a passo de um teorema percorrendo o grafo) está em [docs/grafo.md](docs/grafo.md).
+
 ### Estado
 
 - `messages`: a conversa com o usuário (pedidos e respostas finais). É o que o
@@ -129,6 +132,8 @@ lean_agent/
   prompts.py        mensagens de sistema de cada nó
   casos.py          os 10 casos e as provas de referência
   avaliacao.py      roda os casos, mostra o rastro e o custo
+docs/
+  grafo.md          explicação detalhada do grafo
 tests/              pytest
 ```
 
