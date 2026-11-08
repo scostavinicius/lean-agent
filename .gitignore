@@ -1,2 +1,6 @@
 .env
 groq_key.txt
+.venv/
+workspace/
+__pycache__/
+.pytest_cache/
