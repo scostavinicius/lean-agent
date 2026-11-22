@@ -47,6 +47,23 @@ def montar_cabecalho(enunciado: str) -> str:
     return ": " + enunciado
 
 
+def negar_enunciado(enunciado: str) -> str:
+    """Escreve a negação do enunciado: os binders viram um ∀ dentro do ¬."""
+    texto = enunciado.strip()
+    fim, nivel = 0, 0
+    for i, c in enumerate(texto):
+        if c in "({[⦃":
+            nivel += 1
+        elif c in ")}]⦄":
+            nivel -= 1
+            if nivel == 0:
+                fim = i + 1
+        elif nivel == 0 and not c.isspace():
+            break
+    binders, corpo = texto[:fim].strip(), texto[fim:].strip().removeprefix(":").strip()
+    return f"¬ ∀ {binders}, {corpo}" if binders else f"¬ ({corpo})"
+
+
 def get_arquivo_lean(enunciado: str, prova: str, nome_arquivo: str) -> None:
     """Gera {nome_arquivo}.lean na pasta de trabalho, com as definições e o teorema."""
     PASTA_LEAN.mkdir(exist_ok=True)
@@ -67,6 +84,12 @@ def test_prova(enunciado: str, prova: str, nome_arquivo: str = "Prova") -> tuple
     """
     get_arquivo_lean(enunciado, prova, nome_arquivo)
     arquivo = nome_arquivo + ".lean"
+    if shutil.which("lean") is None:
+        return False, (
+            f"{arquivo}:1:0: error: compilador Lean 4 ('lean') não encontrado no ambiente. "
+            "Instale pelo elan (veja o README) ou execute no Google Colab."
+        )
+
     try:
         # encoding explícito: no Windows o padrão é cp1252, que não decodifica ⊢, ∧, →.
         resultado = subprocess.run(
@@ -76,6 +99,8 @@ def test_prova(enunciado: str, prova: str, nome_arquivo: str = "Prova") -> tuple
     except subprocess.TimeoutExpired:
         # A mensagem imita o formato do Lean para o parsear tratá-la como erro.
         return False, f"{arquivo}: error: o Lean passou de {TIMEOUT_LEAN} s e foi interrompido"
+    except FileNotFoundError:
+        return False, f"{arquivo}:1:0: error: compilador Lean 4 ('lean') não encontrado no ambiente."
 
     saida = resultado.stdout + resultado.stderr
     aceita = resultado.returncode == 0 and "sorry" not in saida and "sorry" not in prova

@@ -7,7 +7,9 @@ Explicação de cada nó, das arestas e do caminho que um teorema percorre. O c�
 
 ```mermaid
 graph TD
-    START([início]) --> interpretar
+    START([início]) --> guardrail_entrada
+    guardrail_entrada -.->|bloqueado| guardrail_saida
+    guardrail_entrada -.->|aprovado| interpretar
     interpretar -.->|pedido de prova| planejar
     interpretar -.->|conversa| conversar
     planejar --> agente
@@ -18,8 +20,11 @@ graph TD
     cobrar --> agente
     agente -.->|Lean aceitou ou rodadas esgotadas| verificar
     ferramentas -.->|Lean aceitou ou rodadas esgotadas| verificar
-    verificar --> FIM([fim])
-    conversar --> FIM
+    conversar -.->|chamou ferramenta| ferramentas_conversa
+    ferramentas_conversa --> conversar
+    conversar -.->|respondeu| guardrail_saida
+    verificar --> guardrail_saida
+    guardrail_saida --> FIM([fim])
 ```
 
 ## Como ler o desenho
@@ -28,8 +33,9 @@ graph TD
   para `agente`.
 - **Seta pontilhada:** aresta condicional. Uma função olha o estado e escolhe o próximo nó. Por
   isso `agente` e `ferramentas` têm três saídas cada.
-- **Dois caminhos:** a conversa comum (`conversar`) e o agente de provas (`planejar` → `agente` ⇄
-  `ferramentas` → `cobrar` / `verificar`).
+- **Dois caminhos protegidos por guardrails:** toda entrada passa por `guardrail_entrada` e toda
+  saída passa por `guardrail_saida`. Entre eles ficam a conversa com ferramentas (`conversar` ⇄
+  `ferramentas_conversa`) e o agente de provas (`planejar` → `agente` ⇄ `ferramentas` → `cobrar` / `verificar`).
 
 ## O estado
 
@@ -38,17 +44,26 @@ Todos os nós leem e escrevem no mesmo estado (`Estado`, um `TypedDict`):
 | campo | o que guarda |
 |---|---|
 | `messages` | A conversa que o usuário vê: pedidos e respostas finais. O checkpointer guarda esse campo por `thread_id`, e é daí que vem a memória entre turnos. |
-| `rascunho` | O trabalho do teorema atual: pedido com o plano, cada tática testada e cada erro do Lean. Zera a cada teorema, para a thread não carregar tentativas antigas e cada passo reenviar só o teorema atual (a Groq limita tokens por minuto). |
+| `rascunho` | O trabalho do turno atual: pedido, chamadas a RAG/MCP/Skills, táticas testadas e erros do Lean. Zera a cada novo pedido para não carregar tentativas antigas na thread. |
 | `intencao` | `"provar"` ou `"conversa"`, decidido por `interpretar`. |
 | `enunciado` | O teorema a provar, fixado pelo grafo e não pelo modelo. |
 | `nome_arquivo` | O `.lean` deste teorema, um por thread, para duas conversas não sobrescreverem o arquivo uma da outra. |
 | `plano` | O plano formatado, ou vazio se o modelo não conseguiu gerá-lo. |
 | `tentativas` | Uma entrada por chamada a `testar_tatica`: a prova, se foi aceita, o erro e a resposta devolvida ao modelo. |
-| `passos` | Chamadas ao `agente` na rodada atual. O limite é `MAX_PASSOS = 6`. |
+| `negacao_aceita`, `refutada` | Preenchidos por `testar_negacao` e confirmados em `verificar` quando o teorema é falso. |
+| `skills_carregadas` | Skills ativadas sob demanda via `carregar_skill` no turno atual (exibidas na interface Streamlit). |
+| `bloqueado_guardrail`, `motivo_bloqueio` | Flag e justificativa quando `guardrail_entrada` barra prompt injection ou pedido fora do escopo. |
+| `passos` | Chamadas ao `agente` (ou `conversar`) na rodada atual. O limite é `MAX_PASSOS = 6` (`MAX_PASSOS_CONVERSA = 4`). |
 | `rodada` | Rodada atual. O limite é `MAX_RODADAS = 2`. |
 | `aceita`, `prova` | O veredito final, escrito por `verificar`. |
 
 ## Os nós
+
+### `guardrail_entrada`: proteção antes do modelo
+
+Primeira parada de toda mensagem. Impede prompt injection / burla ao verificador (como pedir
+`sorry` ou `IO.Process`) e solicitações fora do domínio matemático/Lean 4. Se bloquear, envia a
+explicação direto para `guardrail_saida` sem gastar tokens do modelo.
 
 ### `interpretar`: o que o usuário quer?
 
@@ -71,14 +86,15 @@ mais fácil e receber "ACEITA".
 
 **Sai para:** `planejar` se for pedido de prova, `conversar` se não for (`rotear_intencao`).
 
-### `conversar`: o que não é prova
+### `conversar` ⇄ `ferramentas_conversa`: dúvidas, RAG, Skills e MCP
 
-Responde dúvidas como "o que faz a tática omega?" ou "qual tática você usou na prova anterior?". O
-modelo vê as últimas 8 mensagens da thread, então lembra das provas feitas antes, e a resposta vai
-direto para o fim.
+Responde dúvidas sobre táticas, lemas, documentação e turnos anteriores da conversa. O modelo vê as
+últimas 8 mensagens da thread (`messages`) e possui acesso a `consultar_documentacao` (RAG),
+`carregar_skill` (catálogo de skills), `ler_guia_taticas` e às ferramentas MCP (servidor próprio e
+`mcp-server-fetch`), executadas em `ferramentas_conversa` usando o `rascunho` temporário do turno.
 
-**Por que existe:** nem toda mensagem é pedido de prova. É o ponto onde o RAG e as skills vão
-entrar.
+**Sai para:** `ferramentas_conversa` quando chama ferramentas (até `MAX_PASSOS_CONVERSA = 4`) ou
+`guardrail_saida` quando produz a resposta final em texto.
 
 ### `planejar`: pensar antes de tentar
 
@@ -118,15 +134,20 @@ cada passo reenvia o rascunho todo à API.
 **Sai para** (`depois_do_agente`): `ferramentas` se o modelo chamou uma ferramenta; se não, a
 decisão de fim de rodada (`fim_da_rodada`) escolhe entre `cobrar` e `verificar`.
 
-### `ferramentas`: onde o Lean entra
+### `ferramentas`: onde Lean, RAG, MCP e Skills executam
 
 Um `ToolNode` que executa a ferramenta pedida e escreve a resposta no `rascunho`:
 
 - **`testar_tatica`**: monta o `.lean` com as definições, o enunciado do estado e as táticas do
   modelo, roda o compilador e devolve `ACEITA` ou `RECUSADA`. Quando recusa, o parser já resume o
   log em mensagem, hipóteses e objetivo (⊢). Cada chamada vira uma entrada em `tentativas`.
-- **`ler_guia_taticas`**: devolve o guia de sintaxe do `GuiaLean4.md`. Hoje esse arquivo não está
-  no repositório, e a ferramenta responde "Guia não encontrado".
+- **`testar_negacao`**: monta a negação formal (`negar_enunciado`) e roda o Lean para refutar
+  teoremas falsos via contraexemplo.
+- **`consultar_documentacao`**: RAG agêntico sobre os capítulos reais de *Theorem Proving in Lean 4*.
+- **`carregar_skill`**: injeta sob demanda o conteúdo do `SKILL.md` escolhido do catálogo.
+- **`mcp_lean_*` e `mcp_comunidade_fetch`**: chamadas reais via protocolo MCP (`stdio`) ao servidor
+  próprio da dupla (`lean-mcp-proprio`) e ao servidor da comunidade (`mcp-server-fetch`).
+- **`ler_guia_taticas`**: devolve o guia rápido de sintaxe em [GuiaLean4.md](../GuiaLean4.md).
 
 O vaivém `agente` ⇄ `ferramentas` é o laço "propõe → testa → lê o erro → corrige".
 
@@ -140,21 +161,9 @@ Entra quando a rodada termina **sem nenhuma prova aceita pelo Lean**. Há duas s
 - O modelo respondeu em texto, desistindo ou afirmando que terminou.
 - Os 6 passos acabaram.
 
-O nó acrescenta ao rascunho uma mensagem do próprio grafo:
-
-```
-O Lean ainda não aceitou nenhuma prova, então a tarefa não terminou.
-Último resultado de testar_tatica:
-RECUSADA (erro_compilacao) ...
-Continue: proponha outra prova e teste com testar_tatica.
-```
-
+O nó acrescenta ao rascunho uma mensagem do próprio grafo pedindo para continuar.
 Depois abre a rodada seguinte: `rodada` + 1, `passos` volta a 0 e o rascunho é mantido, para o
 modelo não repetir o que já falhou.
-
-**Por que existe:** modelos às vezes dizem "pronto, provado" sem o Lean ter aceitado nada, ou
-desistem cedo. Quem decide se acabou é o grafo olhando as `tentativas`, não o texto do modelo. A
-cobrança acontece no máximo `MAX_RODADAS - 1` vezes, o que limita o custo.
 
 **Sai para:** `agente`, sempre.
 
@@ -162,22 +171,17 @@ cobrança acontece no máximo `MAX_RODADAS - 1` vezes, o que limita o custo.
 
 Último nó do caminho de prova. Ele:
 
-1. Pega a primeira prova que o Lean aceitou (`primeira_aceita`).
-2. **Roda o Lean de novo** nela, fora do agente. Assim, nenhuma falha no registro das tentativas
-   faz uma prova errada passar como certa.
-3. Escreve a resposta final em `messages`:
-   - **com prova aceita:** "Teorema `X` provado e verificado pelo Lean", o código exato que o Lean
-     aceitou e a explicação do agente;
-   - **sem prova aceita:** "Não consegui uma prova de `X` que o Lean aceitasse (N prova(s)
-     testada(s) em R rodada(s))", o último erro do Lean e o que o agente disse.
+1. Pega a primeira prova que o Lean aceitou (`primeira_aceita`), ou a refutação (`negacao_aceita`).
+2. **Roda o Lean de novo** fora do agente para confirmar que o compilador aceitou sem `sorry`.
+3. Escreve a resposta final em `messages` (provado, refutado ou não consegui).
 
-O código mostrado ao usuário vem das `tentativas`, não do texto do modelo. O prompt do agente pede
-que ele não repita a prova, porque ele poderia reescrevê-la diferente da versão aceita.
+**Sai para:** `guardrail_saida`.
 
-**Limitação atual:** nos casos falsos (TESTE6 e TESTE10), "Não consegui" é o resultado esperado,
-mas o agente só chega lá falhando. A ferramenta `testar_negacao` da Unidade I, que prova a negação
-do enunciado, ainda não foi trazida para o grafo. Com ela, `verificar` poderia responder "o
-teorema é falso" com uma refutação verificada pelo Lean.
+### `guardrail_saida`: auditoria final antes da entrega
+
+Último nó do grafo antes de `END`. Verifica a resposta final contra vazamento de credenciais
+(`gsk_...`, prompts internos) e impede que o agente afirme ter provado um teorema se `aceita=False`
+e `refutada=False`.
 
 **Sai para:** o fim.
 

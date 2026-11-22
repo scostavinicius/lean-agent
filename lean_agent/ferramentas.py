@@ -1,8 +1,9 @@
-"""Ferramentas que o agente pode chamar.
+"""Ferramentas que o agente e o nó de conversa podem chamar.
 
-O enunciado e o nome do arquivo vêm do estado do grafo (InjectedState), e não
-dos argumentos que o modelo escreve: se o modelo pudesse escolher o enunciado,
-poderia testar um teorema mais fácil e receber ACEITA.
+Por quê: o enunciado e o nome do arquivo vêm do estado do grafo (InjectedState) nas
+ferramentas de verificação (`testar_tatica` e `testar_negacao`), nunca de argumentos
+do modelo: se ele pudesse escolher o enunciado, poderia provar um teorema mais fácil
+e receber ACEITA.
 """
 from pathlib import Path
 from typing import Annotated
@@ -12,25 +13,28 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from .lean import test_prova
+from .lean import negar_enunciado, test_prova
+from .mcp_client import (
+    FERRAMENTAS_MCP,
+    mcp_comunidade_fetch,
+    mcp_lean_analisar_teorema,
+    mcp_lean_consultar,
+    mcp_lean_listar_definicoes,
+)
 from .parser import parsear
+from .rag import consultar_documentacao
+from .skills import carregar_skill
 
 
-# Por quê: o modelo consulta a sintaxe das táticas quando está em dúvida, em vez
-# de inventar. O texto vem do GuiaLean4.md do repositório.
 @tool
 def ler_guia_taticas() -> str:
-    """Retorna o guia rápido de sintaxe e táticas básicas do Lean 4."""
+    """Retorna o guia rápido de sintaxe e táticas básicas do Lean 4 em português."""
     caminho = Path("GuiaLean4.md")
     if caminho.exists():
         return caminho.read_text(encoding="utf-8")
     return "Guia não encontrado."
 
 
-# Por quê: roda o Lean uma vez por chamada e devolve o erro já analisado. Como
-# não há laço aqui dentro, é o modelo quem decide tentar de novo (ReAct, aula 06).
-# Cada chamada vira uma entrada em `tentativas` no estado, e é por ali que o
-# grafo sabe se a prova foi aceita.
 @tool(parse_docstring=True)
 def testar_tatica(
     prova: str,
@@ -54,7 +58,8 @@ def testar_tatica(
             f"RECUSADA ({log.get('tipo', 'desconhecido')})\n"
             f"erro: {erro}\n"
             f"hipoteses: {log.get('hipoteses') or '(nenhuma)'}\n"
-            f"objetivo: {log.get('objetivo') or '(nao extraido)'}"
+            f"objetivo: {log.get('objetivo') or '(nao extraido)'}\n"
+            "Dica: se precisar, carregue a skill 'diagnostico_erros' ou consulte a documentação com 'consultar_documentacao'."
         )
     tentativa = {"prova": prova, "aceita": aceita, "erro": erro, "resposta": resposta}
     return Command(update={
@@ -63,4 +68,49 @@ def testar_tatica(
     })
 
 
-FERRAMENTAS = [ler_guia_taticas, testar_tatica]
+@tool(parse_docstring=True)
+def testar_negacao(
+    prova: str,
+    enunciado: Annotated[str, InjectedState("enunciado")],
+    nome_arquivo: Annotated[str, InjectedState("nome_arquivo")],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Roda o Lean na sua prova da NEGAÇÃO do teorema atual, quando ele parecer falso (contraexemplo).
+
+    Args:
+        prova: táticas depois do "by" para provar a negação (ex: 'intro h\\nexact absurd (h 0 1) (by decide)').
+    """
+    negacao = negar_enunciado(enunciado)
+    aceita, saida = test_prova(negacao, prova, f"{nome_arquivo}_negacao")
+    if aceita:
+        resposta = f"ACEITA_NEGACAO: o Lean aprovou a refutação de {negacao}. O teorema original é FALSO."
+        return Command(update={
+            "negacao_aceita": prova,
+            "rascunho": [ToolMessage(resposta, tool_call_id=tool_call_id)],
+        })
+
+    log = parsear(saida)
+    erro = log.get("mensagem_limpa") or saida.strip()[:300]
+    resposta = (
+        f"RECUSADA ({log.get('tipo', 'desconhecido')}) ao provar {negacao}\n"
+        f"erro: {erro}\n"
+        f"hipoteses: {log.get('hipoteses') or '(nenhuma)'}\n"
+        f"objetivo: {log.get('objetivo') or '(nao extraido)'}"
+    )
+    return Command(update={
+        "rascunho": [ToolMessage(resposta, tool_call_id=tool_call_id)],
+    })
+
+
+# Ferramentas para o laço de conversa (RAG, Skills, MCP, guia) — sem `testar_tatica` que exige `enunciado`.
+FERRAMENTAS_CONVERSA = [
+    ler_guia_taticas,
+    consultar_documentacao,
+    carregar_skill,
+] + FERRAMENTAS_MCP
+
+# Ferramentas completas para o agente provador.
+FERRAMENTAS = [
+    testar_tatica,
+    testar_negacao,
+] + FERRAMENTAS_CONVERSA
