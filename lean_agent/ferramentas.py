@@ -14,13 +14,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from .lean import negar_enunciado, test_prova
-from .mcp_client import (
-    FERRAMENTAS_MCP,
-    mcp_comunidade_fetch,
-    mcp_lean_analisar_teorema,
-    mcp_lean_consultar,
-    mcp_lean_listar_definicoes,
-)
+from .mcp_client import FERRAMENTAS_MCP
 from .parser import parsear
 from .rag import consultar_documentacao
 from .skills import carregar_skill
