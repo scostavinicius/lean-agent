@@ -9,38 +9,20 @@ Como iniciar manualmente:
 """
 import argparse
 import asyncio
-import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 
-# Garante importação limpa mesmo quando executado como script standalone
-_RAIZ = Path(__file__).resolve().parent.parent
-if str(_RAIZ) not in sys.path:
-    sys.path.insert(0, str(_RAIZ))
-
-# Evita acionar lean_agent/__init__.py se executado diretamente
-if shutil.which("lean") is None:
-    os.environ["PATH"] = os.path.expanduser("~/.elan/bin") + os.pathsep + os.environ["PATH"]
-
-PASTA_LEAN = Path("workspace")
-TIMEOUT_LEAN = 60
-
-DEFINICOES_LEAN = """def dobro : Nat → Nat
-  | 0     => 0
-  | n + 1 => dobro n + 2
-
-def soma : Nat → Nat
-  | 0     => 0
-  | n + 1 => soma n + (n + 1)
-
-def rev {α : Type} : List α → List α
-  | []      => []
-  | x :: xs => rev xs ++ [x]"""
+# Garante importação limpa sem acionar lean_agent/__init__.py quando executado via stdio
+_DIR_ATUAL = Path(__file__).resolve().parent
+if __package__:
+    from .lean_web import DEFINICOES_LEAN, TIMEOUT_LEAN, executar_lean_web
+else:
+    if str(_DIR_ATUAL) not in sys.path:
+        sys.path.insert(0, str(_DIR_ATUAL))
+    from lean_web import DEFINICOES_LEAN, TIMEOUT_LEAN, executar_lean_web
 
 COMANDOS_CONSULTA = ("#check", "#print", "#eval", "#reduce")
 PROIBIDO_EM_CONSULTA = re.compile(r"\b(IO|System|Process|FS|unsafe)\b")
@@ -50,43 +32,22 @@ mcp_proprio = MCPServer("lean-mcp-proprio", version="1.0.0")
 
 @mcp_proprio.tool(
     name="mcp_lean_consultar",
-    description="Roda no compilador Lean 4 UM comando de consulta (#check, #print, #eval ou #reduce) e devolve a resposta.",
+    description="Roda no Lean 4 (via Web API) UM comando de consulta (#check, #print, #eval ou #reduce) e devolve a resposta.",
 )
 def lean_consultar(comando: str) -> str:
-    """Executa uma consulta segura de tipo ou definição diretamente no Lean 4."""
+    """Executa uma consulta segura de tipo ou definição remotamente no Lean 4."""
     comando = comando.strip()
     if "\n" in comando or not comando.startswith(COMANDOS_CONSULTA):
         return f"RECUSADO: envie um único comando que comece com {', '.join(COMANDOS_CONSULTA)}."
     if PROIBIDO_EM_CONSULTA.search(comando):
         return "RECUSADO: consultas não podem usar IO, System, Process, FS nem unsafe."
 
-    if shutil.which("lean") is None:
-        return (
-            "ERRO: compilador Lean 4 ('lean') não encontrado no PATH nem em ~/.elan/bin. "
-            "Instale pelo elan (veja o README) ou execute no Google Colab."
-        )
-
-    PASTA_LEAN.mkdir(exist_ok=True)
-    arquivo = PASTA_LEAN / "Consulta_MCP.lean"
-    arquivo.write_text(f"{DEFINICOES_LEAN}\n\n{comando}\n", encoding="utf-8")
-
-    try:
-        resultado = subprocess.run(
-            ["lean", arquivo.name],
-            cwd=PASTA_LEAN,
-            capture_output=True,
-            text=True,
-            timeout=TIMEOUT_LEAN,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except subprocess.TimeoutExpired:
-        return f"ERRO: o Lean passou de {TIMEOUT_LEAN} s nessa consulta."
-
+    codigo = f"{DEFINICOES_LEAN}\n\n{comando}\n"
+    _, saida_bruta = executar_lean_web(codigo, arquivo="Consulta_MCP.lean", timeout=TIMEOUT_LEAN)
     saida = re.sub(
-        r"^\S*Consulta_MCP\.lean:\d+:\d+:\s*(info:\s*)?",
+        r"^\S*Consulta_MCP\.lean:\d+:\d+:\s*(info(?:\([^)]+\))?:\s*)?",
         "",
-        resultado.stdout + resultado.stderr,
+        saida_bruta,
         flags=re.MULTILINE,
     )
     return (saida.strip() or "(o Lean não imprimiu nada)")[:800]

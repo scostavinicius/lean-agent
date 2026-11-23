@@ -36,6 +36,9 @@ TESTES_PARSER = [
     ("timeout do test_prova",
      "Prova.lean: error: o Lean passou de 60 s e foi interrompido",
      {"tipo": "erro_compilacao", "mensagem_limpa": "o Lean passou de 60 s e foi interrompido"}),
+    ("código de erro do Lean 4.29+",
+     "Prova.lean:15:2: error(lean.unknownIdentifier): Unknown constant `foo`\n",
+     {"tipo": "erro_compilacao", "mensagem_limpa": "Unknown constant `foo`", "hipoteses": "", "objetivo": ""}),
 ]
 
 

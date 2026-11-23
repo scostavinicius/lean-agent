@@ -7,7 +7,7 @@ ele tem testes em tests/test_parser.py.
 """
 import re
 
-CABECALHO_MENSAGEM = re.compile(r"^\S+?\.lean(?::\d+:\d+)?: (error|warning|info): ", re.MULTILINE)
+CABECALHO_MENSAGEM = re.compile(r"^\S+?\.lean(?::\d+:\d+)?: (error|warning|info)(?:\([^)]+\))?: ", re.MULTILINE)
 
 
 def separar_mensagens(texto_log: str) -> list[tuple[str, str]]:

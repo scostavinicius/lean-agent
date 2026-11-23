@@ -14,6 +14,7 @@ from lean_agent.mcp_client import (
 from lean_agent.rag import consultar_documentacao, resumo_base_rag
 from lean_agent.skills import descobrir_skills, ler_conteudo_skill, obter_catalogo_prompt
 
+from .conftest import requer_lean
 from .test_grafo import ModeloRoteirizado
 
 
@@ -83,6 +84,15 @@ def test_mcp_stdio_descoberta_e_ferramentas_proprias():
 
     recusa = mcp_lean_consultar.invoke({"comando": "#eval IO.println 1"})
     assert "RECUSADO" in recusa
+
+
+@requer_lean
+def test_mcp_stdio_consultar_lean_web():
+    res = mcp_lean_consultar.invoke({"comando": "#check Nat.add_comm"})
+    assert "Nat.add_comm" in res and "n + m = m + n" in res
+
+    res_eval = mcp_lean_consultar.invoke({"comando": "#eval dobro 5"})
+    assert "10" in res_eval
 
 
 def test_testar_negacao_nao_expoe_enunciado_e_nega_corretamente():

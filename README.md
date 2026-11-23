@@ -28,7 +28,7 @@ Estudantes e pesquisadores aprendendo **Lean 4** enviam pedidos de demonstraçã
 
 ### Pré-requisitos
 - Python 3.11+
-- Lean 4 instalado via [elan](https://github.com/leanprover/elan) para compilação real de provas e consultas `#check`/`#print` (no Colab, o notebook [lean_agent_langgraph.ipynb](lean_agent_langgraph.ipynb) instala o `elan` automaticamente).
+- Acesso à internet para compilar provas e consultas `#check`/`#print`/`#eval` diretamente na **Web API do Lean 4** (Compiler Explorer / `godbolt.org` — não é necessário instalar `elan` nem `lean` localmente).
 
 ### Instalação no Ambiente Virtual (`.venv`)
 
@@ -48,6 +48,7 @@ Copie [.env.example](.env.example) para `.env` (que está no `.gitignore`) e inf
 |---|---|
 | `GROQ_API_KEY` | chave da Groq, obrigatória |
 | `LEAN_AGENT_MODELO` | opcional; padrão `openai/gpt-oss-120b` |
+| `LEAN_WEB_URL` | opcional; endpoint web de compilação Lean 4 (padrão `https://godbolt.org/api/compiler/lean_4_29_1/compile`) |
 
 ### Como iniciar o servidor MCP e a interface
 
@@ -167,6 +168,6 @@ Execução realizada via `.venv/bin/python -m lean_agent casos --pausa 3.0` (sem
 **Taxa de Acerto Geral (execução local sem o binário `lean`):** 9/10 (90.0%)
 
 ### Breve análise dos erros e limitações observados
-1. **Dependência do binário `lean` em `TESTE10_DESAFIO_PROVA`:** Como política de segurança e fidelidade do projeto, `test_prova` nunca simula aprovação quando o executável `lean` não está instalado no host. Na máquina local sem `elan`, `testar_tatica` devolveu `compilador Lean 4 ('lean') não encontrado`, levando o agente a acionar a skill `diagnostico_erros`, tentar nova rodada e encerrar honestamente sem alucinar uma prova aprovada. Ao executar no Google Colab (onde o notebook instala o `elan` automaticamente) ou com `elan` instalado localmente, o verificador passa a validar a prova real.
+1. **Dependência do binário `lean` na execução histórica de `TESTE10_DESAFIO_PROVA`:** Na execução original acima (sem `elan` local), `test_prova` reportou honestamente que o executável `lean` não estava instalado. Posteriormente, `test_prova` e `mcp_lean_consultar` foram migrados para a **Web API do Lean 4** (`lean_agent/lean_web.py`, via Compiler Explorer / `LEAN_WEB_URL`), permitindo validar provas reais remotamente sem instalar nada na máquina.
 2. **Desvio inicial de ferramenta em `TESTE1_RAG`:** Quando o usuário citou "documentação oficial" sem especificar busca local, o modelo tentou adivinhar URLs no `mcp_comunidade_fetch` (recebendo 404) antes de acionar o RAG local `consultar_documentacao` e obter o trecho correto. Ajustar a prioridade entre RAG local e fetch web no prompt reduz chamadas extras em perguntas conceituais.
 3. **Fallback do modo `strict` da Groq em `TESTE4_MCP_PROPRIO`:** Em uma chamada do nó `interpretar`, a Groq rejeitou o esquema estrito (`Parsing failed`) e o mecanismo de fallback de `modelo.py` recuperou o JSON via prompt sem interromper o fluxo.

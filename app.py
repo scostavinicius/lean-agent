@@ -64,6 +64,7 @@ with st.sidebar:
     st.divider()
     st.subheader("Componentes Ativos")
     st.markdown("🟢 **Grafo LangGraph:** Estado, nós e guardrails")
+    st.markdown("🟢 **Compilador Lean 4:** Execução na web via HTTP (sem instalação local)")
     st.markdown("🟢 **Memória (Checkpointer):** `InMemorySaver` por thread")
     st.markdown(f"🟢 **RAG Agêntico:** {info_rag['arquivos']} capítulos TPiL ({info_rag['trechos']} trechos)")
     st.markdown("🟢 **MCP Próprio:** `lean-mcp-proprio` (stdio)")
