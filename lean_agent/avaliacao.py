@@ -165,8 +165,8 @@ def tabela_markdown_unidade2(resultados: list[dict]) -> str:
     aprovados = sum(1 for r in resultados if r["aprovado"])
 
     for r in resultados:
-        status_ico = "✅ Aprovado" if r["aprovado"] else "❌ Reprovado"
-        desaf_ico = "⭐ Sim" if r["desafiador"] else "Não"
+        status_ico = " Aprovado" if r["aprovado"] else " Reprovado"
+        desaf_ico = " Sim" if r["desafiador"] else "Não"
         entrada_limpa = r["entrada"].replace("|", "\\|")
         esperado_limpo = r["esperado"].replace("|", "\\|")
         obtido_limpo = r["obtido"].replace("|", "\\|")
