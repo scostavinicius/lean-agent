@@ -93,7 +93,7 @@ CASOS_UNIDADE_2 = [
         "id": "TESTE10_DESAFIO_PROVA",
         "categoria": "Desafio Completo (Planejar + Skills + Lean)",
         "desafiador": True,
-        "entrada": "Prove o teorema: (n : Nat) : dobro n = 2 * n",
+        "entrada": "Prove o teorema: (p q : Prop) : (p → q) → ¬q → ¬p",
         "esperado": "Planeja a prova, carrega skill indutiva, submete ao compilador Lean e só diz provado se o Lean aceitar.",
     },
 ]
